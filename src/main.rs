@@ -2,7 +2,7 @@
 
 // バイナリセマフォを実現する
 
-use std::{thread, time::Duration};
+use std::{cell::SyncUnsafeCell, sync::atomic::AtomicUsize, thread, time::Duration};
 
 use crate::mutex::RawSpinLock;
 
@@ -13,6 +13,9 @@ static SEMAPHORE2: RawSpinLock<()> = RawSpinLock::new(());
 static SEMAPHORE3: RawSpinLock<()> = RawSpinLock::new(());
 static SEMAPHORE4: RawSpinLock<()> = RawSpinLock::new(());
 static SEMAPHORE5: RawSpinLock<()> = RawSpinLock::new(());
+
+static NON_ATOMIC_USIZE: SyncUnsafeCell<usize> = SyncUnsafeCell::new(0);
+static ATOMIC_USIZE: AtomicUsize = AtomicUsize::new(0);
 
 struct Philosopher<'a>(u8, &'a RawSpinLock<()>, &'a RawSpinLock<()>);
 
@@ -44,6 +47,9 @@ fn main() {
         .map(|p| {
             thread::spawn(move || {
                 p.eat();
+                for _ in 0..1000 {
+                    unsafe { *NON_ATOMIC_USIZE.get() += 1 };
+                }
             })
         })
         .collect();
@@ -52,8 +58,9 @@ fn main() {
         h.join().unwrap();
     }
 
-    mutex::enable_raw_atomics();
+    println!("NON_ATOMIC_USIZE: {}", unsafe { *NON_ATOMIC_USIZE.get() });
 
+    mutex::enable_raw_atomics();
     println!("--- With raw atomics enabled ---");
 
     let philosophers = vec![
@@ -69,6 +76,9 @@ fn main() {
         .map(|p| {
             thread::spawn(move || {
                 p.eat();
+                for _ in 0..1000 {
+                    ATOMIC_USIZE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
             })
         })
         .collect();
@@ -76,4 +86,9 @@ fn main() {
     for h in handles {
         h.join().unwrap();
     }
+
+    println!(
+        "ATOMIC_USIZE: {}",
+        ATOMIC_USIZE.load(std::sync::atomic::Ordering::SeqCst)
+    );
 }
